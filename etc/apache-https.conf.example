@@ -1,0 +1,26 @@
+<VirtualHost *:443>
+ ServerName aiworker.example.com
+ DocumentRoot /opt/aiworker/app/html
+ ErrorLog ${APACHE_LOG_DIR}/aiworker.example.com-error.log
+ CustomLog ${APACHE_LOG_DIR}/aiworker.example.com-access.log combined
+ <Directory /opt/aiworker/app>
+  AllowOverride None
+  Require all denied
+ </Directory>
+ <Directory /opt/aiworker/app/html>
+  Options -Indexes -FollowSymLinks
+  AllowOverride All
+  Require all granted
+  LimitRequestBody 35651584
+  <LimitExcept GET POST HEAD>
+   Require all denied
+  </LimitExcept>
+  <FilesMatch "^(index|api)\.php$">
+   SetHandler "proxy:unix:/run/php/aiworker.sock|fcgi://localhost"
+  </FilesMatch>
+ </Directory>
+ SSLEngine on
+ SSLCertificateFile /etc/ssl/certs/aiworker.crt
+ SSLCertificateKeyFile /etc/ssl/private/aiworker.key
+ Timeout 60
+</VirtualHost>

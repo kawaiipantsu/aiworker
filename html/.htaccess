@@ -1,0 +1,17 @@
+Options -Indexes -MultiViews -ExecCGI -Includes +SymLinksIfOwnerMatch
+DirectoryIndex index.php
+ServerSignature Off
+<FilesMatch "(^\.|\.(env|ini|log|sql|sqlite|md|bak|old|swp|sh|json|ya?ml|toml|zip)$)">
+ Require all denied
+</FilesMatch>
+<FilesMatch "^(?!index\.php$|api\.php$).*\.(php[0-9]?|phtml|phar)$">
+ Require all denied
+</FilesMatch>
+RewriteEngine On
+RewriteRule (^|/)\. - [F,L]
+RewriteRule ^(?:app|worker|etc|contrib|docs|var|vendor|node_modules)(?:/|$) - [F,L,NC]
+Header always set X-Content-Type-Options "nosniff"
+Header always set X-Frame-Options "DENY"
+Header always set Referrer-Policy "same-origin"
+Header always set Permissions-Policy "camera=(), microphone=(), geolocation=()"
+Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"

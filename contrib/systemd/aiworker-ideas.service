@@ -1,0 +1,25 @@
+[Unit]
+Description=AI Worker OpenAI idea generator and account sign-in
+After=network-online.target redis-server.service
+Wants=network-online.target
+Requires=redis-server.service
+StartLimitIntervalSec=0
+[Service]
+Type=simple
+User=aiworker-ideas
+Group=aiworker-ideas
+WorkingDirectory=/opt/aiworker/app/worker
+Environment=HOME=/var/lib/aiworker-ideas
+ExecStart=/usr/bin/node /opt/aiworker/app/worker/ideas-service.mjs
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/aiworker-ideas
+[Install]
+WantedBy=multi-user.target

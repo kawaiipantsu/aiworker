@@ -1,0 +1,1 @@
+{"type":"object","properties":{"outcome":{"type":"string","enum":["completed","blocked","failed"]},"summary":{"type":"string"},"question":{"type":"string","description":"If blocked by missing user input, one clear question. Otherwise an empty string."}},"required":["outcome","summary","question"],"additionalProperties":false}

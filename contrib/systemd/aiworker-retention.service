@@ -1,0 +1,15 @@
+[Unit]
+Description=AI Worker cancelled project retention and deletion
+After=network-online.target
+[Service]
+Type=oneshot
+User=aiworker
+Group=aiworker
+ExecStart=/usr/bin/php /opt/aiworker/app/contrib/project-retention.php --apply
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/projects
+TimeoutStartSec=15min
+UMask=0007

@@ -1,0 +1,27 @@
+[Unit]
+Description=AI Worker autonomous workload dispatcher
+After=network-online.target redis-server.service
+Wants=network-online.target
+Requires=redis-server.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=aiworker
+Group=aiworker
+WorkingDirectory=/opt/aiworker/app/worker
+Environment=HOME=/var/lib/aiworker
+Environment=CODEX_HOME=/var/lib/aiworker/.codex
+Environment=CLAUDE_CONFIG_DIR=/var/lib/aiworker/.claude
+Environment=PATH=/opt/aiworker/bin:/usr/local/bin:/usr/bin:/bin
+EnvironmentFile=-/opt/aiworker/app/etc/worker.env
+ExecStart=/usr/bin/node /opt/aiworker/app/worker/service.mjs
+Restart=always
+RestartSec=5
+KillMode=control-group
+TimeoutStopSec=30
+UMask=0007
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

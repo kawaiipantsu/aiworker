@@ -1,0 +1,3 @@
+# Optional log retention; review the dry-run report before installing.
+# 17 4 * * * root /usr/bin/php /opt/aiworker/app/contrib/cleanup.php --apply --days=90
+# Daily backups are provided by aiworker-backup.timer instead of cron.

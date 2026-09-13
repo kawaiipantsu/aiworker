@@ -1,0 +1,18 @@
+{
+  "db": {
+    "host": "127.0.0.1",
+    "user": "aiworker",
+    "password": "GENERATED_BY_BOOTSTRAP",
+    "database": "aiworker"
+  },
+  "beanstalk": {
+    "host": "127.0.0.1",
+    "port": 11300,
+    "tube": "aiworker"
+  },
+  "redis": "redis://127.0.0.1:6379/5",
+  "projects": "/srv/projects",
+  "url": "https://aiworker.example.com",
+  "codex": "/opt/aiworker/bin/codex",
+  "claude": "/opt/aiworker/bin/claude"
+}

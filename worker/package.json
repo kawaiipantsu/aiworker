@@ -1,0 +1,1 @@
+{"name":"aiworker-service","version":"1.0.0","private":true,"type":"module","scripts":{"start":"node service.mjs","test":"node --test ../tests/*.test.mjs"},"dependencies":{"fflate":"^0.8.3","mysql2":"^3.14.0","redis":"^5.0.0"},"devDependencies":{"@playwright/test":"^1.51.0","@prettier/plugin-php":"^0.25.0","prettier":"^3.9.6"}}
