@@ -78,7 +78,7 @@ function history_api(string $action, string $method, array $u): void
         $args[] = $provider;
     }
     $rows = q(
-        "SELECT id,name,slug,provider,model,created_at,started_at,finished_at,summary FROM jobs WHERE $where ORDER BY finished_at DESC,id DESC",
+        "SELECT id,name,slug,provider,model,created_at,started_at,finished_at,summary,workspace FROM jobs WHERE $where ORDER BY finished_at DESC,id DESC",
         $args,
     )->fetchAll();
     audit("jobs.export", $format, count($rows) . " completed projects");
@@ -109,7 +109,6 @@ function history_api(string $action, string $method, array $u): void
             "\r\n",
         );
         foreach ($rows as $r) {
-            $r["workspace"] = "/srv/projects/" . $r["slug"];
             $values = array_map(function ($v) {
                 $v = (string) ($v ?? "");
                 // Prevent spreadsheet formula execution, including leading whitespace/control characters.

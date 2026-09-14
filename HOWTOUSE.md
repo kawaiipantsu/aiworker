@@ -26,7 +26,8 @@ maintain and complete a living `docs/TASKS.md` task list.
 ## 2. Bring code—or start empty
 
 Leave starter files empty for a new project, upload a ZIP, or provide a public
-HTTP/HTTPS ZIP URL. ZIP URLs cannot use private-network addresses or embedded
+HTTP/HTTPS ZIP URL. Select **Use Kawaiipantsu scaffold** to download `scaffold.zip`
+from the latest Kawaiipantsu release when creating the workload. ZIP URLs cannot use private-network addresses or embedded
 credentials. Keep secrets, `.env` files, provider logins, and private keys out of
 scaffolds and prompts. Archives are limited to 32 MiB compressed and 256 MiB
 expanded; traversal paths and symlinks are rejected.
@@ -74,3 +75,19 @@ own retention policy. Cleanup is off by default.
 
 See [operations](docs/OPERATIONS.md) for recovery, backups, password resets,
 notifications, and service commands.
+
+### Workspace folder
+
+The new-workload dialog lets you override the default `/srv/projects` base directory. Enter an existing absolute directory that the `aiworker` OS user can write to. The project folder is appended automatically. **Include unique ID in folder name** is on by default; turn it off for a predictable name. FQDNs such as `app.example.com` retain their dots (normalized to lowercase, without a trailing DNS dot); other names become slugs. Existing folders and paths assigned to another workload are rejected. The same folder name can be used under different base directories.
+
+### Suggestion queue and generation prompt
+
+The **Suggestion queue** tab beside Completed shows daily ideas with a short summary and expandable details. **Pick** opens the populated workload form; creating the workload consumes the suggestion. Closing the form leaves it available. **Drop** removes the suggestion without starting work.
+
+Administration controls **Ideas per day** (default 2; 0 disables generation; maximum 20) and the editable **I feel lucky · generation prompt**, including reset to the built-in default. The prompt applies to both manual and scheduled ideas. `{{category}}` and `{{categories}}` are optional server-filled placeholders. The server appends output-format, scaffold, and recent-concept requirements.
+
+Daily generation runs at **08:00 Europe/Copenhagen** using the connected OpenAI account. Starter files are unchecked by default; generated ideas select **Use Kawaiipantsu scaffold**. You can change the scaffold before creating a workload.
+
+Administration also provides **I feel lucky · categories**. Enter one category per line to add, edit, or remove entries, then choose **Save categories**. **Reset categories to default** restores the built-in list independently of the generation prompt. The saved list applies to manual and daily generation, including `{{category}}`, `{{categories}}`, and the accepted output categories. Requests already running keep the list they started with.
+
+Generated ideas default to **Codex: Astra / Medium** or **Claude: Fable / High** in the workload form, including existing suggestions and switching providers while reviewing an idea. You can still adjust the workload settings before creating it.

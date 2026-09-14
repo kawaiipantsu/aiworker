@@ -100,7 +100,7 @@ The **Starter files** checkbox requests optional scaffolding. Safe relative text
 
 ## ZIP URLs
 
-New workloads support either an uploaded ZIP, a public HTTP/HTTPS ZIP URL, generated starter files, or no scaffold. URL download happens on Create, with progress indicated on the button. Files are stored in the same `uploads` database table and follow the existing validated extraction process.
+New workloads support either an uploaded ZIP, a public HTTP/HTTPS ZIP URL, the Kawaiipantsu scaffold, generated starter files, or no scaffold. **Use Kawaiipantsu scaffold** downloads `scaffold.zip` from `https://github.com/kawaiipantsu/ai-project-scaffold/releases/latest/download/scaffold.zip` on each creation, using the same URL download and archive validation safeguards. URL download happens on Create, with progress indicated on the button. Files are stored in the same `uploads` database table and follow the existing validated extraction process.
 
 URL imports use standard ports, reject embedded credentials and fragments, resolve and validate all destination IPs, pin the selected public address for the HTTP connection, and revalidate every redirect. Private/reserved addresses, local-only hostnames, HTTPS-to-HTTP redirects and non-HTTP schemes are refused. Downloads are limited to 32 MiB, four redirects and a bounded request time. An external URL does not need to end in `.zip`, but its downloaded content must be a valid, safe ZIP archive. No authentication headers or application cookies are forwarded to the remote server.
 
@@ -123,3 +123,11 @@ In **Completed**, choose **Export CSV** or **Download PDF report**. Both include
 Both downloads require an authenticated account and are audited. No prompts, credentials or raw worker logs are included. Empty results produce a CSV header or an explanatory PDF. PDF generation uses Debian's `php-tcpdf` package (`apt-get install php-tcpdf`); Python 3 is required for workspace deletion. Neither process contacts an external reporting service.
 
 Official references: [Codex authentication and device-code sign-in](https://learn.chatgpt.com/docs/auth), [GPT-5.6 Terra](https://developers.openai.com/api/docs/models/gpt-5.6-terra), [structured Responses output](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+## Per-workload workspace paths
+
+Run `php contrib/migrate-workspaces.php` when upgrading, then restart `aiworker` when no workloads are running. Installation runs this migration automatically. Existing workload paths are preserved using the configured projects directory. New workloads store their full workspace path, with uniqueness enforced per path instead of per slug. The base must already exist at its canonical absolute path; directory creation requires worker write permission. The web API validates path syntax and database collisions; the isolated worker checks the filesystem during preparation and reports inaccessible directories or existing folders as workload errors. New workloads refuse existing directories, while retries reuse their own workspace.
+
+Cancelled-project cleanup uses the saved workspace path and refuses symlink ancestors. For custom paths, add the chosen base to the retention service’s `ReadWritePaths` using a systemd override, then run `systemctl daemon-reload`. The service remains limited to `/srv/projects` until additional paths are configured. OS ownership/ACLs must also allow the `aiworker` user to write to the chosen base; selecting a path in the dialog does not change permissions.
+
+Passwordless root access can be explicitly enabled using `contrib/sudoers/aiworker-full-access` (see INSTALL.md). Workloads can then run any command as root with `sudo -n`; the dispatcher still runs as `aiworker`. Provider full-access modes do not themselves change the OS account’s permissions.

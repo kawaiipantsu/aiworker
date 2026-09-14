@@ -4,7 +4,8 @@ import { readFile, mkdir, mkdtemp, rm, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import {
   ideaPrompt,
-  ideaSchema,
+  ideaSchemaFor,
+  categories,
   testSchema,
   validateIdea,
   scaffoldZip,
@@ -167,11 +168,15 @@ async function runIdea(row) {
         }
       })
       .filter(Boolean);
+    const [promptSetting] = await q("SELECT value FROM settings WHERE `key`='lucky_prompt'");
+    const template = promptSetting ? JSON.parse(promptSetting.value) : undefined;
+    const [categorySetting] = await q("SELECT value FROM settings WHERE `key`='lucky_categories'");
+    const selectedCategories = categorySetting ? JSON.parse(categorySetting.value) : categories;
     const testing = row.kind === "test",
-      schema = testing ? testSchema : ideaSchema,
+      schema = testing ? testSchema : ideaSchemaFor(selectedCategories),
       prompt = testing
         ? 'Reply only with the JSON object {"ok":true}. Do not use tools or inspect any files.'
-        : ideaPrompt(!!row.with_scaffold, names);
+        : ideaPrompt(!!row.with_scaffold, names, template, selectedCategories);
     let result, refreshed;
     if (connection.mode === "api_key")
       result = await responsesGenerate(credential.api_key, prompt, schema, {
@@ -196,7 +201,7 @@ async function runIdea(row) {
           "OpenAI connection test did not return the expected response.",
         );
       result = { ok: true };
-    } else result = validateIdea(result, !!row.with_scaffold);
+    } else result = validateIdea(result, !!row.with_scaffold, selectedCategories);
     const zip = testing ? null : scaffoldZip(result.scaffold_files);
     const conn = await pool.getConnection();
     try {

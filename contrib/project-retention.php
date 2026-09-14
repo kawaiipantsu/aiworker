@@ -76,7 +76,9 @@ try {
                 [
                     "/usr/bin/python3",
                     __DIR__ . "/remove-workspace.py",
-                    $job["slug"],
+                    $job["workspace"],
+                    (string) $job["id"],
+                    (string) $job["workspace_ready"],
                 ],
                 [0 => ["pipe", "r"], 1 => ["pipe", "w"], 2 => ["pipe", "w"]],
                 $pipes,

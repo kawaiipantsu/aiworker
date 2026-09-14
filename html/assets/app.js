@@ -135,7 +135,7 @@ async function health() {
 async function overview() {
   page = 1;
   $("#main").innerHTML =
-    `<div class="page-head"><div><span class="eyebrow">MISSION CONTROL</span><h1>Your workloads</h1><span class="muted">An idea, a prompt, and a worker. Take it from here.</span></div><div class="actions"><label class="lucky-option"><input type="checkbox" id="lucky-scaffold" checked> Starter files</label><button id="lucky" class="secondary">✦ &nbsp; I feel lucky</button><button id="new" class="primary">＋ &nbsp; New project / workload</button></div></div><div id="service-notice"></div><section class="stats" id="stats"></section><section class="workspace"><div class="workload-views" role="group" aria-label="Workload views"><button data-view="active" class="view-tab">Active</button><button data-view="completed" class="view-tab">Completed</button><button data-view="closed" class="view-tab">Cancelled / failed</button><button data-view="all" class="view-tab">All history</button><span class="hint">Completed projects are retained. Cancelled project cleanup is managed in Administration.</span></div><div class="toolbar"><input id="search" type="search" placeholder="Search workloads or projects…" aria-label="Search workloads"><select id="status-filter" aria-label="Filter status"><option value="">All statuses</option>${["queued", "preparing", "running", "waiting_input", "rate_limited", "paused", "completed", "failed", "cancelled"].map((s) => `<option value="${s}">${s.replaceAll("_", " ")}</option>`).join("")}</select><select id="provider-filter" aria-label="Filter provider"><option value="">All workers</option><option value="codex">Codex</option><option value="claude">Claude</option></select></div><div id="completed-exports" class="actions completed-exports hidden"><a class="secondary" id="export-csv">Export CSV ↓</a><a class="secondary" id="export-pdf">Download PDF report ↓</a><span class="hint">All completed projects matching your filters, across all pages.</span></div><div class="table-wrap"><table><thead><tr><th>Project / workload</th><th>Status</th><th>AI worker</th><th>Model</th><th>Updated</th><th></th></tr></thead><tbody id="jobs-body"></tbody></table></div><div class="table-foot"><span id="total"></span><div><button id="previous" class="subtle">← Previous</button><span id="page"></span><button id="next" class="subtle">Next →</button></div></div></section>`;
+    `<div class="page-head"><div><span class="eyebrow">MISSION CONTROL</span><h1>Your workloads</h1><span class="muted">An idea, a prompt, and a worker. Take it from here.</span></div><div class="actions"><label class="lucky-option"><input type="checkbox" id="lucky-scaffold"> Starter files</label><button id="lucky" class="secondary">✦ &nbsp; I feel lucky</button><button id="new" class="primary">＋ &nbsp; New project / workload</button></div></div><div id="service-notice"></div><section class="stats" id="stats"></section><section class="workspace"><div class="workload-views" role="group" aria-label="Workload views"><button data-view="active" class="view-tab">Active</button><button data-view="completed" class="view-tab">Completed</button><button data-view="suggestions" class="view-tab">Suggestion queue</button><button data-view="closed" class="view-tab">Cancelled / failed</button><button data-view="all" class="view-tab">All history</button><span class="hint">Completed projects are retained. Cancelled project cleanup is managed in Administration.</span></div><div class="toolbar"><input id="search" type="search" placeholder="Search workloads or projects…" aria-label="Search workloads"><select id="status-filter" aria-label="Filter status"><option value="">All statuses</option>${["queued", "preparing", "running", "waiting_input", "rate_limited", "paused", "completed", "failed", "cancelled"].map((s) => `<option value="${s}">${s.replaceAll("_", " ")}</option>`).join("")}</select><select id="provider-filter" aria-label="Filter provider"><option value="">All workers</option><option value="codex">Codex</option><option value="claude">Claude</option></select></div><div id="completed-exports" class="actions completed-exports hidden"><a class="secondary" id="export-csv">Export CSV ↓</a><a class="secondary" id="export-pdf">Download PDF report ↓</a><span class="hint">All completed projects matching your filters, across all pages.</span></div><div class="table-wrap"><table><thead><tr><th>Project / workload</th><th>Status</th><th>AI worker</th><th>Model</th><th>Updated</th><th></th></tr></thead><tbody id="jobs-body"></tbody></table></div><div class="table-foot"><span id="total"></span><div><button id="previous" class="subtle">← Previous</button><span id="page"></span><button id="next" class="subtle">Next →</button></div></div></section>`;
   $("#new").onclick = () => project();
   $("#lucky").onclick = () => OpenAIUI.generate();
   $$("[data-view]").forEach(
@@ -190,6 +190,34 @@ async function loadJobs() {
       provider: $("#provider-filter").value,
       page,
     });
+  const suggestions = workloadView === "suggestions";
+  $("#status-filter").disabled = suggestions;
+  $("#provider-filter").disabled = suggestions;
+  if (suggestions) {
+    const d = await api("suggestions", undefined, "&" + params);
+    if (token !== routeToken || request !== jobsRequest) return;
+    $$("[data-view]").forEach(b => {
+      b.classList.toggle("selected", b.dataset.view === workloadView);
+      b.setAttribute("aria-pressed", String(b.dataset.view === workloadView));
+    });
+    $("#completed-exports").classList.add("hidden");
+    const expanded = new Set($$("details[data-suggestion][open]").map(el => el.dataset.suggestion));
+    $("#jobs-body").innerHTML = d.suggestions.map(r => `<tr><td><strong>${esc(r.result?.name || "Generating suggestion…")}</strong><p class="hint">${esc(r.result?.summary || r.error || "Waiting for the idea service")}</p>${r.result ? `<details data-suggestion="${esc(r.id)}" ${expanded.has(r.id) ? "open" : ""}><summary>View details</summary><p>${esc(r.result.category)} · ${esc(r.result.project_type)}</p><pre class="prompt-text">${esc(r.result.initial_prompt)}</pre><pre class="json-preview">${esc(JSON.stringify(r.result, null, 2))}</pre></details>` : ""}</td><td>${badge(r.status)}</td><td>${esc(r.result?.recommended_worker || "—")}</td><td>${r.result ? (r.result.recommended_worker === "codex" ? "Astra / Medium" : "Fable / High") : "—"}</td><td>${esc(date(r.created_at))}</td><td><div class="actions"><button class="primary" data-pick="${esc(r.id)}" ${r.status !== "ready" ? "disabled" : ""}>Pick</button><button class="secondary" data-drop="${esc(r.id)}">Drop</button></div></td></tr>`).join("") || '<tr><td colspan="6" class="empty">No suggestions yet. New ideas arrive daily at 08:00.</td></tr>';
+    $$("[data-pick]").forEach(b => b.onclick = safe(async () => {
+      const draft = await api("lucky_status", undefined, "&draft=" + encodeURIComponent(b.dataset.pick));
+      if (draft.status !== "ready") throw new Error("Suggestion is no longer available.");
+      project(draft);
+    }));
+    $$("[data-drop]").forEach(b => b.onclick = safe(async () => {
+      await api("suggestion_drop", {id: b.dataset.drop});
+      await loadJobs();
+    }));
+    $("#total").textContent = `${d.total} suggestions · Pick to review and create a workload`;
+    $("#page").textContent = String(page);
+    $("#previous").disabled = page <= 1;
+    $("#next").disabled = page * 50 >= d.total;
+    return;
+  }
   const d = await api("jobs", undefined, "&" + params);
   if (token !== routeToken || request !== jobsRequest) return;
   $$("[data-view]").forEach((b) => {
@@ -228,7 +256,7 @@ async function loadJobs() {
     ? d.jobs
         .map(
           (j) =>
-            `<tr class="job-row" data-job="${j.id}" tabindex="0"><td><a class="job-name" href="#job/${j.id}">${esc(j.name)}</a><span class="job-path">/srv/projects/${esc(j.slug)}</span></td><td>${badge(j.status)}</td><td><span class="provider ${esc(j.provider)}">${esc(j.provider === "codex" ? "Codex" : "Claude")}</span></td><td>${esc(j.model)}</td><td class="muted">${esc(date(j.updated_at))}</td><td>↗</td></tr>`,
+            `<tr class="job-row" data-job="${j.id}" tabindex="0"><td><a class="job-name" href="#job/${j.id}">${esc(j.name)}</a><span class="job-path">${esc(j.workspace)}</span></td><td>${badge(j.status)}</td><td><span class="provider ${esc(j.provider)}">${esc(j.provider === "codex" ? "Codex" : "Claude")}</span></td><td>${esc(j.model)}</td><td class="muted">${esc(date(j.updated_at))}</td><td>↗</td></tr>`,
         )
         .join("")
     : `<tr><td colspan="6" class="empty"><div class="empty-icon">⌘</div><h3>${$("#search").value || $("#status-filter").value || $("#provider-filter").value ? "No matching workloads" : workloadView === "active" ? "No active workloads" : "No projects in this view"}</h3><p>${workloadView === "active" ? "Create a workload, or browse Completed and All history to revisit earlier work." : "Browse retained projects here. Cancelled projects can be deleted by an administrator."}</p></td></tr>`;
@@ -247,6 +275,7 @@ async function loadJobs() {
 function project(draft = null) {
   const f = $("#project-form");
   f.reset();
+  f.workspace_base.placeholder = catalog.projects_base;
   $("#project-error").textContent = "";
   if (draft) {
     const idea = draft.result;
@@ -260,18 +289,19 @@ function project(draft = null) {
   updateModels();
   if (draft) {
     const idea = draft.result;
-    if (
-      idea.recommended_worker === "codex" &&
-      catalog.models.codex.includes("gpt-5.6-terra")
-    )
-      f.model.value = "gpt-5.6-terra";
-    f.effort.value = idea.thinking;
+    applyLuckyDefaults();
     f.agents.checked = idea.enable_agents;
     f.dynamic_work.checked = idea.dynamic_work;
   }
   OpenAIUI.resetProject(draft);
   slugPreview();
   $("#project-dialog").showModal();
+}
+function applyLuckyDefaults() {
+  const f = $("#project-form");
+  f.model.value = f.provider.value === "codex" ? "gpt-6-astra" : "fable";
+  f.model.onchange();
+  f.effort.value = f.provider.value === "codex" ? "medium" : "high";
 }
 function updateModels() {
   const f = $("#project-form"),
@@ -290,17 +320,24 @@ function updateModels() {
   if (p !== "claude") f.dynamic_work.checked = false;
 }
 function slugPreview() {
-  const name = $("#project-form")
-    .elements.name.value.toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 130);
+  const f = $("#project-form");
+  const raw = f.elements.name.value.trim().toLowerCase();
+  const domain = raw.replace(/\.$/, "");
+  const label = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
+  const isDomain = domain.length <= 160 && new RegExp("^(?:" + label + "\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$").test(domain);
+  const name = isDomain ? domain : raw.normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "").slice(0, 130);
+  const base = (f.workspace_base.value.trim() || catalog.projects_base).replace(/\/+$/, "");
   $("#slug-preview").textContent =
-    `Workspace: /srv/projects/${name || "your-project"}-[unique ID]`;
+    `Workspace: ${base}/${name || "your-project"}${f.include_unique_id.checked ? "-[unique ID]" : ""}`;
 }
-$("#project-form").provider.onchange = updateModels;
+$("#project-form").workspace_base.oninput = slugPreview;
+$("#project-form").include_unique_id.onchange = slugPreview;
+$("#project-form").provider.onchange = () => {
+  updateModels();
+  if ($("#project-form").lucky_id.value) applyLuckyDefaults();
+};
 $("#project-form").model.onchange = () => {
   const f = $("#project-form"),
     p = f.provider.value;
@@ -320,11 +357,13 @@ $("#project-form").onsubmit = async (e) => {
   b.disabled = true;
   const originalLabel = b.textContent;
   b.textContent =
-    f.scaffold_source.value === "url"
+    ["url", "kawaiipantsu"].includes(f.scaffold_source.value)
       ? "Importing ZIP and creating…"
       : "Creating workload…";
   try {
-    const result = await api("create", new FormData(f));
+    const data = new FormData(f);
+    data.set("include_unique_id", f.include_unique_id.checked ? "1" : "0");
+    const result = await api("create", data);
     f.lucky_id.value = "";
     $("#project-dialog").close();
     location.hash = "job/" + result.id;
@@ -367,7 +406,7 @@ async function refreshDetail() {
   if (id !== detailId) return;
   const j = d.job;
   $("#detail-head").innerHTML =
-    `<div class="page-head"><div><h1>${esc(j.name)}</h1><span class="job-path">/srv/projects/${esc(j.slug)}</span> &nbsp; ${badge(j.status)}</div><div class="actions">${["running", "preparing", "queued", "rate_limited"].includes(j.status) ? '<button class="secondary" data-control="pause">Pause</button>' : '<button class="secondary" data-control="resume">Resume / retry</button>'}<button class="danger" data-control="cancel">Cancel</button>${j.status === "cancelled" && me.role === "admin" ? '<button class="danger" id="delete-project">Delete project</button>' : ""}</div></div>${j.retry_at ? `<div class="notice">Provider cooldown · automatic retry after ${esc(date(j.retry_at))}</div>` : ""}${j.summary ? `<p class="muted">${esc(j.summary)}</p>` : ""}`;
+    `<div class="page-head"><div><h1>${esc(j.name)}</h1><span class="job-path">${esc(j.workspace)}</span> &nbsp; ${badge(j.status)}</div><div class="actions">${["running", "preparing", "queued", "rate_limited"].includes(j.status) ? '<button class="secondary" data-control="pause">Pause</button>' : '<button class="secondary" data-control="resume">Resume / retry</button>'}<button class="danger" data-control="cancel">Cancel</button>${j.status === "cancelled" && me.role === "admin" ? '<button class="danger" id="delete-project">Delete project</button>' : ""}</div></div>${j.retry_at ? `<div class="notice">Provider cooldown · automatic retry after ${esc(date(j.retry_at))}</div>` : ""}${j.summary ? `<p class="muted">${esc(j.summary)}</p>` : ""}`;
   $$("[data-control]").forEach(
     (b) =>
       (b.onclick = safe(async () => {
@@ -380,7 +419,7 @@ async function refreshDetail() {
     $("#delete-project").onclick = safe(async () => {
       if (
         !confirm(
-          `Permanently delete “${j.name}”? This removes /srv/projects/${j.slug}, logs, prompts, uploads and workload history. The audit record is kept.`,
+          `Permanently delete “${j.name}”? This removes ${j.workspace}, logs, prompts, uploads and workload history. The audit record is kept.`,
         )
       )
         return;
@@ -461,7 +500,7 @@ async function adminView() {
     s = Object.fromEntries(d.settings.map((x) => [x.key, JSON.parse(x.value)]));
   if (location.hash !== "#admin") return;
   $("#main").innerHTML =
-    `<div class="page-head"><div><span class="eyebrow">WORKSHOP SETTINGS</span><h1>Administration</h1><span class="muted">Workers, people, and the little details.</span></div></div><div class="admin-grid">${OpenAIUI.adminCard()}<section class="card"><h3>Cancelled project cleanup</h3><form id="retention-form"><label class="check"><input name="enabled" type="checkbox" ${s.cancelled_cleanup_enabled ? "checked" : ""}>Automatically delete cancelled projects</label><label>Days after cancellation<input name="days" type="number" min="1" max="3650" value="${s.cancelled_retention_days ?? 30}" required></label><p class="hint">Permanently removes cancelled workspaces, uploads, prompts and logs. Audit records and existing backups remain. Completed and failed projects are excluded. Off by default; manual deletion is available on cancelled project pages.</p><button class="primary">Save cleanup policy</button></form></section><section class="card"><h3>Worker capacity & recovery</h3><form id="settings-form"><div class="form-grid"><label>Parallel Codex workers<input name="parallel_codex" type="number" min="1" max="16" value="${s.parallel_codex}" required></label><label>Parallel Claude workers<input name="parallel_claude" type="number" min="1" max="16" value="${s.parallel_claude}" required></label></div><p class="hint">Independent provider slots. One Claude and one Codex can always run together.</p><label>Base retry interval (seconds)<input name="retry_seconds" type="number" min="1" max="86400" value="${s.retry_seconds}" required></label><label>Codex models · one per line<textarea name="models_codex">${esc(s.models_codex.join("\n"))}</textarea></label><label>Claude models · one per line<textarea name="models_claude">${esc(s.models_claude.join("\n"))}</textarea></label><label class="check"><input type="checkbox" name="paused" ${s.paused ? "checked" : ""}>Pause new dispatches</label><button class="primary">Save settings</button></form><p class="hint">Cooldowns respect detected reset times. Unknown resets use bounded exponential retries. Account access determines which models work.</p><div class="actions"><button class="secondary" data-reset="codex">Retry Codex now</button><button class="secondary" data-reset="claude">Retry Claude now</button></div></section><section class="card"><h3>Discord webhooks</h3><p class="hint">Receive workload status notifications. Webhook URLs are stored privately and never returned to the browser. Enabling a webhook authorizes status delivery to that destination.</p><form id="webhook-form"><input type="hidden" name="id" value="0"><label>Name<input name="name" required maxlength="80"></label><label>Discord webhook URL<input name="url" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label><label class="check"><input type="checkbox" name="enabled" checked>Enabled</label><button class="primary">Save webhook</button></form><div id="webhook-list">${d.webhooks.map((w) => `<div class="message-item">${esc(w.name)} · ${w.enabled ? "Enabled" : "Disabled"} <button class="subtle" data-hook-edit="${w.id}">Edit</button><button class="subtle" data-hook-delete="${w.id}">Delete</button></div>`).join("") || '<p class="muted">No webhooks configured.</p>'}</div><h3>Recent deliveries</h3>${d.deliveries.map((x) => `<p class="hint">Job #${x.job_id} · ${esc(x.status)} · ${x.delivered_at ? "Delivered" : `Pending (${x.attempts} attempts)`} ${esc(x.last_error || "")}</p>`).join("") || '<p class="hint">No deliveries yet.</p>'}</section><section class="card wide"><h3>User management</h3><div class="table-wrap"><table><thead><tr><th>Username</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${d.users.map((u) => `<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${u.active ? "Active" : "Disabled"}</td><td><button class="subtle" data-user="${u.id}">Edit</button></td></tr>`).join("")}</tbody></table></div><form id="user-form"><input type="hidden" name="id" value="0"><div class="form-grid"><label>Username<input name="username" required minlength="3" maxlength="80"></label><label>Role<select name="role"><option value="operator">Operator</option><option value="admin">Administrator</option></select></label><label>Password<input name="password" type="password" minlength="14" autocomplete="new-password" placeholder="14+ characters; blank keeps existing"></label><label class="check"><input type="checkbox" name="active" checked>Account active</label></div><div class="actions"><button class="primary">Save user</button><button type="reset" class="secondary">New user</button></div></form></section><section class="card wide"><h3>Audit log · most recent 150 events</h3><div class="table-wrap"><table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Target</th><th>IP address</th></tr></thead><tbody>${d.audit.map((a) => `<tr><td>${esc(date(a.created_at))}</td><td>${esc(a.username || "system")}</td><td>${esc(a.action)}</td><td>${esc(a.target)}</td><td>${esc(a.ip)}</td></tr>`).join("")}</tbody></table></div></section></div>`;
+    `<div class="page-head"><div><span class="eyebrow">WORKSHOP SETTINGS</span><h1>Administration</h1><span class="muted">Workers, people, and the little details.</span></div></div><div class="admin-grid">${OpenAIUI.adminCard()}<section class="card wide"><h3>I feel lucky · generation prompt</h3><form id="lucky-prompt-form"><label>Initial generation prompt<textarea name="prompt" rows="16" maxlength="20000" required></textarea></label><p class="hint">Used for manual ideas and daily suggestions. {{category}} inserts a random category; {{categories}} inserts the supported categories. Output format, scaffold choice, and recent-idea avoidance are appended automatically. Changes apply to requests that have not started yet.</p><div class="actions"><button class="primary">Save prompt</button><button type="button" id="lucky-prompt-reset" class="secondary">Reset to default</button></div></form></section><section class="card"><h3>I feel lucky · categories</h3><form id="lucky-categories-form"><label>Categories · one per line<textarea name="categories" rows="14" maxlength="12000" required></textarea></label><p class="hint">Add, edit, or remove categories for manual ideas and daily suggestions. Enter 1–100 categories, up to 100 characters each. The prompt placeholders use this list. Changes apply to generation requests that have not started yet.</p><div class="actions"><button class="primary">Save categories</button><button type="button" id="lucky-categories-reset" class="secondary">Reset categories to default</button></div></form></section><section class="card"><h3>Suggestion queue</h3><form id="suggestions-form"><label>Ideas per day<input name="count" type="number" min="0" max="20" value="${s.suggestions_daily_count ?? 2}" required></label><p class="hint">Generate ideas daily at 08:00 Europe/Copenhagen. Set 0 to disable. Suggestions wait for Pick or Drop; workloads start only after you create them. Uses the connected OpenAI account and Kawaiipantsu scaffold by default.</p><button class="primary">Save suggestion settings</button></form></section><section class="card"><h3>Cancelled project cleanup</h3><form id="retention-form"><label class="check"><input name="enabled" type="checkbox" ${s.cancelled_cleanup_enabled ? "checked" : ""}>Automatically delete cancelled projects</label><label>Days after cancellation<input name="days" type="number" min="1" max="3650" value="${s.cancelled_retention_days ?? 30}" required></label><p class="hint">Permanently removes cancelled workspaces, uploads, prompts and logs. Audit records and existing backups remain. Completed and failed projects are excluded. Off by default; manual deletion is available on cancelled project pages.</p><button class="primary">Save cleanup policy</button></form></section><section class="card"><h3>Worker capacity & recovery</h3><form id="settings-form"><div class="form-grid"><label>Parallel Codex workers<input name="parallel_codex" type="number" min="1" max="16" value="${s.parallel_codex}" required></label><label>Parallel Claude workers<input name="parallel_claude" type="number" min="1" max="16" value="${s.parallel_claude}" required></label></div><p class="hint">Independent provider slots. One Claude and one Codex can always run together.</p><label>Base retry interval (seconds)<input name="retry_seconds" type="number" min="1" max="86400" value="${s.retry_seconds}" required></label><label>Codex models · one per line<textarea name="models_codex">${esc(s.models_codex.join("\n"))}</textarea></label><label>Claude models · one per line<textarea name="models_claude">${esc(s.models_claude.join("\n"))}</textarea></label><label class="check"><input type="checkbox" name="paused" ${s.paused ? "checked" : ""}>Pause new dispatches</label><button class="primary">Save settings</button></form><p class="hint">Cooldowns respect detected reset times. Unknown resets use bounded exponential retries. Account access determines which models work.</p><div class="actions"><button class="secondary" data-reset="codex">Retry Codex now</button><button class="secondary" data-reset="claude">Retry Claude now</button></div></section><section class="card"><h3>Discord webhooks</h3><p class="hint">Receive workload status notifications. Webhook URLs are stored privately and never returned to the browser. Enabling a webhook authorizes status delivery to that destination.</p><form id="webhook-form"><input type="hidden" name="id" value="0"><label>Name<input name="name" required maxlength="80"></label><label>Discord webhook URL<input name="url" type="url" placeholder="https://discord.com/api/webhooks/…" autocomplete="off"></label><label class="check"><input type="checkbox" name="enabled" checked>Enabled</label><button class="primary">Save webhook</button></form><div id="webhook-list">${d.webhooks.map((w) => `<div class="message-item">${esc(w.name)} · ${w.enabled ? "Enabled" : "Disabled"} <button class="subtle" data-hook-edit="${w.id}">Edit</button><button class="subtle" data-hook-delete="${w.id}">Delete</button></div>`).join("") || '<p class="muted">No webhooks configured.</p>'}</div><h3>Recent deliveries</h3>${d.deliveries.map((x) => `<p class="hint">Job #${x.job_id} · ${esc(x.status)} · ${x.delivered_at ? "Delivered" : `Pending (${x.attempts} attempts)`} ${esc(x.last_error || "")}</p>`).join("") || '<p class="hint">No deliveries yet.</p>'}</section><section class="card wide"><h3>User management</h3><div class="table-wrap"><table><thead><tr><th>Username</th><th>Role</th><th>Status</th><th></th></tr></thead><tbody>${d.users.map((u) => `<tr><td>${esc(u.username)}</td><td>${esc(u.role)}</td><td>${u.active ? "Active" : "Disabled"}</td><td><button class="subtle" data-user="${u.id}">Edit</button></td></tr>`).join("")}</tbody></table></div><form id="user-form"><input type="hidden" name="id" value="0"><div class="form-grid"><label>Username<input name="username" required minlength="3" maxlength="80"></label><label>Role<select name="role"><option value="operator">Operator</option><option value="admin">Administrator</option></select></label><label>Password<input name="password" type="password" minlength="14" autocomplete="new-password" placeholder="14+ characters; blank keeps existing"></label><label class="check"><input type="checkbox" name="active" checked>Account active</label></div><div class="actions"><button class="primary">Save user</button><button type="reset" class="secondary">New user</button></div></form></section><section class="card wide"><h3>Audit log · most recent 150 events</h3><div class="table-wrap"><table><thead><tr><th>Time</th><th>User</th><th>Action</th><th>Target</th><th>IP address</th></tr></thead><tbody>${d.audit.map((a) => `<tr><td>${esc(date(a.created_at))}</td><td>${esc(a.username || "system")}</td><td>${esc(a.action)}</td><td>${esc(a.target)}</td><td>${esc(a.ip)}</td></tr>`).join("")}</tbody></table></div></section></div>`;
   $("#retention-form").onsubmit = safe(async (e) => {
     e.preventDefault();
     const f = e.target;
@@ -470,6 +509,34 @@ async function adminView() {
       days: Number(f.days.value),
     });
     toast("Cleanup policy saved");
+  });
+  const categoriesForm = $("#lucky-categories-form");
+  categoriesForm.categories.value = (await api("lucky_categories")).categories.join("\n");
+  categoriesForm.onsubmit = safe(async e => {
+    e.preventDefault();
+    const result = await api("lucky_categories", formData(categoriesForm));
+    categoriesForm.categories.value = result.categories.join("\n");
+    toast("Generation categories saved");
+  });
+  $("#lucky-categories-reset").onclick = safe(async () => {
+    categoriesForm.categories.value = (await api("lucky_categories", {reset: true})).categories.join("\n");
+    toast("Default generation categories restored");
+  });
+  const promptForm = $("#lucky-prompt-form");
+  promptForm.prompt.value = (await api("lucky_prompt")).prompt;
+  promptForm.onsubmit = safe(async e => {
+    e.preventDefault();
+    await api("lucky_prompt", formData(promptForm));
+    toast("Generation prompt saved");
+  });
+  $("#lucky-prompt-reset").onclick = safe(async () => {
+    promptForm.prompt.value = (await api("lucky_prompt", {reset: true})).prompt;
+    toast("Default generation prompt restored");
+  });
+  $("#suggestions-form").onsubmit = safe(async e => {
+    e.preventDefault();
+    await api("suggestions_settings", formData(e.currentTarget));
+    toast("Suggestion settings saved");
   });
   await OpenAIUI.mountAdmin();
   $("#settings-form").onsubmit = safe(async (e) => {

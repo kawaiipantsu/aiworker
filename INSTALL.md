@@ -359,3 +359,38 @@ logins, dispatch pause, service health, and account limits. If PDF export fails,
 check `php-tcpdf` and the FPM `open_basedir` paths. See
 [OPERATIONS.md](docs/OPERATIONS.md) for backup/restore, retries, upgrades, and
 [SECURITY.md](docs/SECURITY.md) for execution boundaries.
+
+## Optional full root access for workloads
+
+To grant every workload running as `aiworker` passwordless sudo for any command,
+install the supplied sudoers rule. The service continues to run as `aiworker`,
+preserving its home directory and provider authentication:
+
+```bash
+visudo -cf contrib/sudoers/aiworker-full-access
+install -o root -g root -m 0440 contrib/sudoers/aiworker-full-access /etc/sudoers.d/aiworker-full-access
+visudo -c
+sudo -u aiworker sudo -n id
+```
+
+For projects under an existing `/srv/www/vhosts-external` directory, grant direct
+write access and allow the retention service to clean up that base:
+
+```bash
+usermod -aG www-data aiworker
+setfacl -m u:aiworker:rwx /srv/www/vhosts-external
+mkdir -p /etc/systemd/system/aiworker-retention.service.d
+cat > /etc/systemd/system/aiworker-retention.service.d/workspaces.conf <<'EOF'
+[Service]
+ReadWritePaths=/srv/www/vhosts-external
+EOF
+systemctl daemon-reload
+systemctl restart aiworker
+```
+
+Restart while the worker is idle. These commands grant access to the base;
+they do not recursively change ownership or permissions of existing websites.
+
+### Daily suggestions upgrade
+
+Apply `app/suggestions.sql` to an existing database (the installer also applies it). Install the daily line from `contrib/aiworker.cron.example` in `/etc/cron.d/aiworker-suggestions`, substituting the actual application path. Use owner root and mode 0644 for the cron file. The cron daemon must use Europe/Copenhagen local time for 08:00 scheduling. The script runs as aiworker, enqueues the configured number of ideas, and prevents duplicate daily slots. It requires an active administrator and a connected OpenAI account; the idea service processes queued entries. Restart `aiworker-ideas.service` after upgrading to load editable generation-prompt support. No workload starts until an operator picks and creates a suggestion.

@@ -1,3 +1,4 @@
+import { prepareWorkspace } from "./workspace.mjs";
 import mysql from "mysql2/promise";
 import { createClient } from "redis";
 import {
@@ -5,9 +6,6 @@ import {
   mkdir,
   writeFile,
   lstat,
-  chmod,
-  rename,
-  rm,
 } from "node:fs/promises";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -85,29 +83,14 @@ async function loadSettings() {
   );
 }
 async function workspace(job) {
-  const dir = config.projects + "/" + job.slug;
-  if (!/^[a-z0-9-]+$/.test(job.slug)) throw new Error("Invalid workspace slug");
-  let exists = false;
-  try {
-    const st = await lstat(dir);
-    if (st.isSymbolicLink() || !st.isDirectory())
-      throw new Error("Unsafe workspace");
-    exists = true;
-  } catch (e) {
-    if (e.code !== "ENOENT") throw e;
-  }
-  if (!exists) {
-    const stage = config.projects + "/.aiworker-stage-" + job.id;
-    // This deterministic staging path is reserved to this job; final workspaces are never removed.
-    await rm(stage, { recursive: true, force: true });
-    await mkdir(stage, { mode: 0o770 });
+  const dir = await prepareWorkspace(job, async (stage) => {
     await runFile(
       "/usr/bin/php",
       [root + "/contrib/extract.php", String(job.id), stage],
       { timeout: 120000, maxBuffer: 1024 * 1024 },
     );
-    await rename(stage, dir);
-  }
+  });
+  await q("UPDATE jobs SET workspace_ready=1 WHERE id=?", [job.id]);
 
   const docs = dir + "/docs";
   try {
@@ -136,7 +119,7 @@ async function workspace(job) {
   return dir;
 }
 function instructions(job) {
-  return `You were launched autonomously by AI Worker (${config.url}/#job/${job.id}). Workload: ${job.name}. Your workspace is ${config.projects}/${job.slug}.\nMake implementation decisions yourself, complete the requested work, and validate the result. Avoid user interaction unless genuinely blocked by missing information. Full-access modes authorize the requested workload, not unrelated destructive changes. Do not alter the AI Worker control plane or other projects.\nKeep the dashboard informed: run '/opt/aiworker/bin/workload status "short progress update"' at milestones and at completion. Run '/opt/aiworker/bin/workload inbox' regularly to read additional user instructions. If essential information is missing, run '/opt/aiworker/bin/workload ask "one clear question"'; it waits for the website answer. Do not ask through an interactive terminal. Write a concise final result with validation and limitations, using the required outcome JSON schema. Only report completed after actually validating the requested result. Report blocked with one clear question if essential user input is missing, or failed for an execution/tool failure.\n${job.agents ? "You may delegate bounded tasks to subagents." : "Do not spawn or delegate to subagents."}\n${job.dynamic_work ? "Dynamic workload is enabled: maintain docs/TASKS.md as a living task list, expand tasks as you learn, and continue until all requirements and validation are complete. This is a workflow instruction, not a CLI extension." : ""}\nRead docs/INIT_PROMPT.md and docs/WORKLOAD_DETAILS.md.\n`;
+  return `You were launched autonomously by AI Worker (${config.url}/#job/${job.id}). Workload: ${job.name}. Your workspace is ${job.workspace}.\nMake implementation decisions yourself, complete the requested work, and validate the result. Avoid user interaction unless genuinely blocked by missing information. Full-access modes authorize the requested workload, not unrelated destructive changes. Do not alter the AI Worker control plane or other projects.\nKeep the dashboard informed: run '/opt/aiworker/bin/workload status "short progress update"' at milestones and at completion. Run '/opt/aiworker/bin/workload inbox' regularly to read additional user instructions. If essential information is missing, run '/opt/aiworker/bin/workload ask "one clear question"'; it waits for the website answer. Do not ask through an interactive terminal. Write a concise final result with validation and limitations, using the required outcome JSON schema. Only report completed after actually validating the requested result. Report blocked with one clear question if essential user input is missing, or failed for an execution/tool failure.\n${job.agents ? "You may delegate bounded tasks to subagents." : "Do not spawn or delegate to subagents."}\n${job.dynamic_work ? "Dynamic workload is enabled: maintain docs/TASKS.md as a living task list, expand tasks as you learn, and continue until all requirements and validation are complete. This is a workflow instruction, not a CLI extension." : ""}\nRead docs/INIT_PROMPT.md and docs/WORKLOAD_DETAILS.md.\n`;
 }
 async function start(job) {
   const state = {

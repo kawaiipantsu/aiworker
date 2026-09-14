@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import {
   LUCKY_MODEL,
   ideaSchema,
+  ideaSchemaFor,
   ideaPrompt,
   validateIdea,
   safeScaffoldPath,
@@ -168,4 +169,32 @@ test("PHP credential encryption is interoperable with Node", () => {
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }
+});
+
+test("custom generation prompts preserve placeholders and output constraints", () => {
+  const prompt = ideaPrompt(false, ["Prior concept"], "Make learning games in {{category}}. Choices: {{categories}}");
+  assert.match(prompt, /Make learning games/);
+  assert.ok(!prompt.includes("{{category"));
+  assert.match(prompt, /Required output contract/);
+  assert.match(prompt, /empty scaffold_files/);
+  assert.match(prompt, /Prior concept/);
+});
+
+test("configured categories govern prompt, schema, and result validation together", () => {
+  const selected = ["botanical puzzles"];
+  const prompt = ideaPrompt(false, [], "Pick {{category}} from {{categories}}", selected);
+  assert.match(prompt, /Pick botanical puzzles from botanical puzzles/);
+  assert.deepEqual(ideaSchemaFor(selected).properties.category.enum, selected);
+  assert.ok(!ideaSchema.properties.category.enum.includes(selected[0]));
+  assert.equal(validateIdea({...idea(), category: selected[0]}, false, selected).category, selected[0]);
+  assert.throws(() => validateIdea(idea(), false, selected), /unsupported project options/);
+});
+
+test("generated workload defaults override model-selected thinking", () => {
+  const codex = validateIdea({...idea(), thinking: "xhigh"}, false);
+  assert.equal(codex.recommended_model, "gpt-6-astra");
+  assert.equal(codex.thinking, "medium");
+  const claude = validateIdea({...idea(), recommended_worker: "claude", thinking: "low"}, false);
+  assert.equal(claude.recommended_model, "fable");
+  assert.equal(claude.thinking, "high");
 });

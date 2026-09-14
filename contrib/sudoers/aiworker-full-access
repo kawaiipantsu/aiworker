@@ -1,0 +1,2 @@
+# Full root access for workloads, explicitly enabled by the administrator.
+aiworker ALL=(ALL:ALL) NOPASSWD: ALL

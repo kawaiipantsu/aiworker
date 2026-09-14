@@ -91,8 +91,8 @@ function completed_pdf(
             $e($r["finished_at"] ?: "Not recorded") .
             " UTC<br>Created: " .
             $e($r["created_at"]) .
-            " UTC<br>Workspace: /srv/projects/" .
-            $e($r["slug"]);
+            " UTC<br>Workspace: " .
+            $e($r["workspace"]);
         $pdf->writeHTML($html, true, false, true, false, "");
         $pdf->Ln(2);
         $pdf->SetFont("dejavusans", "", 10);

@@ -1,30 +1,9 @@
+import { readFileSync } from "node:fs";
+export const defaultIdeaPrompt = readFileSync(new URL("../app/lucky-prompt.txt", import.meta.url), "utf8");
 import { randomInt } from "node:crypto";
 import { zipSync, strToU8 } from "fflate";
 export const LUCKY_MODEL = "gpt-5.6-terra";
-export const categories = [
-  "security tools",
-  "cyber defence",
-  "blue teaming",
-  "fun co-op games",
-  "small mobile games",
-  "progression games",
-  "tower defence",
-  "DevOps tools",
-  "data analysis",
-  "log management",
-  "log analysis",
-  "digital forensics",
-  "authorized scanning",
-  "terminal games",
-  "privacy-respecting surveillance",
-  "music and chiptune",
-  "music prompt creation",
-  "maze builders",
-  "small neural-network engines",
-  "IT testing",
-  "network engineering",
-  "management tools",
-];
+export const categories = JSON.parse(readFileSync(new URL("../app/lucky-categories.json", import.meta.url), "utf8"));
 export const projectTypes = [
   "cli",
   "tui",
@@ -72,24 +51,22 @@ export const ideaSchema = {
   ],
   additionalProperties: false,
 };
+export function ideaSchemaFor(selectedCategories = categories) {
+  return {...ideaSchema, properties: {...ideaSchema.properties, category: {type: "string", enum: [...selectedCategories]}}};
+}
 export const testSchema = {
   type: "object",
   properties: { ok: { type: "boolean" } },
   required: ["ok"],
   additionalProperties: false,
 };
-export function ideaPrompt(withScaffold, recent = []) {
-  const category = categories[randomInt(categories.length)];
-  return `You are a creative product designer preparing one engaging, feasible project for an autonomous coding workshop. Generate a project brief, not a completed implementation. Return only the JSON object required by the response schema. Do not use tools, inspect files, browse, run commands, or ask questions.
+export function ideaPrompt(withScaffold, recent = [], template = defaultIdeaPrompt, selectedCategories = categories) {
+  const category = selectedCategories[randomInt(selectedCategories.length)];
+  return `${template.replaceAll("{{categories}}", selectedCategories.join("; ")).replaceAll("{{category}}", category)}
 
-Create a new project: a terminal CLI, a polished terminal TUI, graphical desktop software for macOS/Windows/Linux that can be built or cross-compiled on Linux, a website, a web game, a creative visualization, a terminal game, or a small mobile game with a Linux-compatible development/build workflow. Do not choose a native iOS-only build that requires macOS. If appropriate, a mobile game can be a touch-friendly installable PWA.
+Workload defaults: For Codex use gpt-6-astra with medium thinking; for Claude use fable with high thinking. Set thinking accordingly.
 
-Focus categories: ${categories.join("; ")}.
-For this request, the server randomly selected: ${category}. Use that exact category and choose an appropriate project type yourself. Invent a suitable, interesting concept with a distinctive hook and a satisfying achievable MVP. Vary names and mechanics. Avoid generic dashboards unless the interaction or analysis makes them distinctive. Blend a second category only when it improves the concept. Security, scanning, forensic and surveillance projects should work with owned/authorized systems, synthetic test data or opt-in data collection; don't propose covert collection or malware.
-
-The name should be memorable, concise, and under 100 characters. Summary: 1–3 sentences. The initial_prompt should be a self-contained, actionable Markdown workload brief of roughly 400–800 words: explain the target user, purpose, differentiating feature, MVP scope, core interactions/game loop, suggested architecture and stack, sensible defaults, constraints, sample data, tests, measurable acceptance criteria, build/run instructions, and final deliverables. A worker should be able to start without asking the user to design it. Prefer modest dependencies and local-first operation. Require a README, reproducible Linux build/setup and verification. Keep scope realistic; mark further ideas as optional, not mandatory. Instruct the worker to make routine decisions autonomously, work inside its provided project directory, and finish and validate the MVP. Do not claim files already exist or dependencies have been installed.
-
-Choose a recommended worker (codex or claude), thinking effort, whether agents would help, and whether the Claude living-task-list workflow would help. dynamic_work must be false for Codex.
+Required output contract: Return only the JSON response schema. Do not use tools or ask questions. Use a supported category and project_type from the schema; dynamic_work must be false for Codex.
 
 ${withScaffold ? "Optionally supply up to 12 small UTF-8 starter files in scaffold_files when useful: directory structure expressed through relative paths, README/setup notes, a minimal package/build configuration, an entry-point skeleton and sample data. Keep each file below 12,000 characters and combined content below 120,000 characters. These are starter files, not a complete project. Do not include binaries, archives, secrets, symlinks, absolute paths, parent traversal, .git metadata, docs/INIT_PROMPT.md or docs/WORKLOAD_DETAILS.md. Do not invent a ZIP download URL. The server packages these text files into a ZIP after validating paths. Return an empty list if scaffolding would not help." : "Return an empty scaffold_files list; scaffolding was not requested."}
 
@@ -109,7 +86,7 @@ export function safeScaffoldPath(path) {
     !/^docs\/(INIT_PROMPT|WORKLOAD_DETAILS)\.md$/i.test(path)
   );
 }
-export function validateIdea(value, withScaffold = true) {
+export function validateIdea(value, withScaffold = true, selectedCategories = categories) {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error(
       "OpenAI returned an invalid project object. Please try again.",
@@ -128,7 +105,7 @@ export function validateIdea(value, withScaffold = true) {
         "OpenAI returned an incomplete project brief. Please try again.",
       );
   if (
-    !categories.includes(value.category) ||
+    !selectedCategories.includes(value.category) ||
     !projectTypes.includes(value.project_type) ||
     !["codex", "claude"].includes(value.recommended_worker) ||
     !["low", "medium", "high", "xhigh"].includes(value.thinking) ||
@@ -165,6 +142,8 @@ export function validateIdea(value, withScaffold = true) {
   if (total > 200000)
     throw new Error("Generated scaffolding exceeds the size limit.");
   if (value.recommended_worker === "codex") value.dynamic_work = false;
+  value.recommended_model = value.recommended_worker === "codex" ? "gpt-6-astra" : "fable";
+  value.thinking = value.recommended_worker === "codex" ? "medium" : "high";
   if (!withScaffold) value.scaffold_files = [];
   return value;
 }

@@ -5,19 +5,19 @@ if (PHP_SAPI !== "cli") {
     exit(1);
 }
 $id = (int) ($argv[1] ?? 0);
-$job = q("SELECT slug FROM jobs WHERE id=?", [$id])->fetch();
+$job = q("SELECT slug,workspace FROM jobs WHERE id=?", [$id])->fetch();
 if (!$job) {
     throw new RuntimeException("Job missing");
 }
-$root = $argv[2] ?? $config["projects"] . "/" . $job["slug"];
+$root = $argv[2] ?? $job["workspace"];
 if (
     isset($argv[2]) &&
-    $root !== $config["projects"] . "/.aiworker-stage-" . $id
+    $root !== dirname($job["workspace"]) . "/.aiworker-stage-" . $id
 ) {
     throw new RuntimeException("Invalid staging path");
 }
 if (
-    !preg_match('/^[a-z0-9-]+$/D', $job["slug"]) ||
+    !preg_match('/^[a-z0-9][a-z0-9.-]*$/D', $job["slug"]) ||
     is_link($root) ||
     !is_dir($root)
 ) {

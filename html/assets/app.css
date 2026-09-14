@@ -323,6 +323,17 @@ td {
   border-bottom: 1px solid var(--line);
   font-size: 12px;
 }
+/* Keep workload descriptions and expanded briefs inside their column. */
+#jobs-body > tr > td:first-child {
+  width: 40%;
+  max-width: 0;
+  min-width: 220px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+#jobs-body .prompt-text {
+  overflow-wrap: anywhere;
+}
 .job-row {
   cursor: pointer;
 }

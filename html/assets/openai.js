@@ -13,6 +13,7 @@ window.OpenAIUI = (() => {
     $("#upload-source").classList.toggle("hidden", source !== "upload");
     $("#url-source").classList.toggle("hidden", source !== "url");
     $("#generated-source").classList.toggle("hidden", source !== "generated");
+    $("#kawaiipantsu-source").classList.toggle("hidden", source !== "kawaiipantsu");
     $("#project-form").zip_url.required = source === "url";
     $("#project-form").zip_url.disabled = source !== "url";
     $("#project-form").zip.disabled = source !== "upload";
@@ -80,7 +81,7 @@ window.OpenAIUI = (() => {
     $("#lucky-loading").showModal();
     try {
       const created = await app.api("lucky_generate", {
-        with_scaffold: $("#lucky-scaffold")?.checked ?? true,
+        with_scaffold: $("#lucky-scaffold")?.checked ?? false,
       });
       requestId = created.id;
       if (cancelled) {
@@ -137,7 +138,7 @@ window.OpenAIUI = (() => {
         .join("");
       $("#scaffold-download").href =
         "/api.php?action=lucky_scaffold&draft=" + encodeURIComponent(draft.id);
-      f.scaffold_source.value = draft.has_scaffold ? "generated" : "none";
+      f.scaffold_source.value = draft.has_scaffold ? "generated" : "kawaiipantsu";
     } else {
       f.scaffold_source.value = "upload";
       $("#generated-files").textContent = "";

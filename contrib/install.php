@@ -3,6 +3,8 @@ if (PHP_SAPI !== "cli") { http_response_code(404); exit(1); }
 umask(0077);
 require __DIR__ . "/../app/bootstrap.php";
 db()->exec(file_get_contents(ROOT . "/app/schema.sql"));
+db()->exec(file_get_contents(ROOT . "/app/suggestions.sql"));
+require __DIR__ . "/migrate-workspaces.php";
 q("INSERT IGNORE INTO openai_connection(id) VALUES(1)");
 if (!q("SHOW COLUMNS FROM jobs LIKE 'rate_attempts'")->fetch()) {
     db()->exec(

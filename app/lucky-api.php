@@ -106,7 +106,7 @@ function handle_lucky_action(string $action, string $method, array $u): void
             );
         }
         $pending = q(
-            "SELECT id,status,kind FROM lucky_drafts WHERE user_id=? AND status IN ('queued','running') ORDER BY created_at LIMIT 1",
+            "SELECT id,status,kind FROM lucky_drafts WHERE user_id=? AND NOT EXISTS (SELECT 1 FROM suggestions WHERE draft_id=lucky_drafts.id) AND status IN ('queued','running') ORDER BY created_at LIMIT 1",
             [$u["id"]],
         )->fetch();
         if ($pending) {
@@ -173,7 +173,7 @@ function handle_lucky_action(string $action, string $method, array $u): void
         )
     ) {
         $id = (string) ($_GET["draft"] ?? "");
-        $draft = q("SELECT * FROM lucky_drafts WHERE id=? AND user_id=?", [
+        $draft = q("SELECT *,EXISTS(SELECT 1 FROM suggestions WHERE draft_id=lucky_drafts.id) AS suggestion FROM lucky_drafts WHERE id=? AND (user_id=? OR EXISTS(SELECT 1 FROM suggestions WHERE draft_id=lucky_drafts.id))", [
             $id,
             $u["id"],
         ])->fetch();
@@ -181,6 +181,7 @@ function handle_lucky_action(string $action, string $method, array $u): void
             fail("Draft not found.", 404);
         }
         if ($action === "lucky_discard" && $method === "POST") {
+            if ($draft["suggestion"]) { output(["ok" => true]); }
             q(
                 "UPDATE lucky_drafts SET status='cancelled',scaffold=NULL,finished_at=NOW(3) WHERE id=? AND status IN ('queued','running','ready')",
                 [$id],
@@ -213,6 +214,7 @@ function handle_lucky_action(string $action, string $method, array $u): void
                     ? json_decode($draft["result"], true)
                     : null,
                 "has_scaffold" => $draft["scaffold"] !== null,
+                "suggestion" => (bool) $draft["suggestion"],
                 "error" => $draft["error"],
             ]);
         }

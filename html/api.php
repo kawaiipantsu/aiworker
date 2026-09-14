@@ -1,10 +1,14 @@
 <?php
 declare(strict_types=1);
 require __DIR__ . "/../app/bootstrap.php";
+require __DIR__ . "/../app/workspace.php";
 header("Cache-Control: no-store");
 set_exception_handler(function (Throwable $e) {
     if ($e instanceof InvalidArgumentException) {
         fail($e->getMessage());
+    }
+    if ($e instanceof PDOException && ($e->errorInfo[1] ?? null) === 1062) {
+        fail("This workspace is already assigned to a workload. Change the name or base directory, or include a unique ID.", 409);
     }
     error_log((string) $e);
     output(
@@ -77,6 +81,8 @@ require_once __DIR__ . "/../app/history-api.php";
 history_api($action, $method, $u);
 require_once __DIR__ . "/../app/lucky-api.php";
 handle_lucky_action($action, $method, $u);
+require_once __DIR__ . "/../app/suggestions-api.php";
+suggestions_api($action, $method, $u);
 if ($action === "logout" && $method === "POST") {
     audit("logout");
     $_SESSION = [];
@@ -85,6 +91,7 @@ if ($action === "logout" && $method === "POST") {
 }
 if ($action === "catalog") {
     output([
+        "projects_base" => $config["projects"],
         "lucky_model" => "gpt-5.6-terra",
         "models" => [
             "codex" => setting("models_codex", []),
@@ -142,7 +149,7 @@ if ($action === "jobs" && $method === "GET") {
     $page = max(1, (int) ($_GET["page"] ?? 1));
     $count = q("SELECT COUNT(*) FROM jobs" . $sql, $params)->fetchColumn();
     $jobs = q(
-        "SELECT id,name,slug,provider,model,status,summary,created_at,updated_at,retry_at,agents,dynamic_work FROM jobs" .
+        "SELECT id,name,slug,workspace,provider,model,status,summary,created_at,updated_at,retry_at,agents,dynamic_work FROM jobs" .
             $sql .
             " ORDER BY id DESC LIMIT 50 OFFSET " .
             ($page - 1) * 50,
@@ -194,20 +201,21 @@ if ($action === "create" && $method === "POST") {
         fail("Ultra thinking requires agents enabled.");
     }
     $dynamic = $provider === "claude" && !empty($_POST["dynamic_work"]) ? 1 : 0;
-    $slug = trim(
-        preg_replace(
-            "/[^a-z0-9]+/",
-            "-",
-            strtolower(iconv("UTF-8", "ASCII//TRANSLIT//IGNORE", $name)),
-        ),
-        "-",
-    );
-    $slug = substr($slug ?: "project", 0, 130) . "-" . bin2hex(random_bytes(4));
+    $base = project_base(bounded("workspace_base", 512, false) ?: $config["projects"]);
+    $unique = (string) ($_POST["include_unique_id"] ?? "1");
+    if (!in_array($unique, ["0", "1"], true)) {
+        fail("Invalid unique-ID option.");
+    }
+    $slug = project_folder($name, $unique === "1");
+    $workspace = $base . "/" . $slug;
+    if (q("SELECT id FROM jobs WHERE workspace=?", [$workspace])->fetchColumn()) {
+        fail("This workspace already exists. Change the name or base directory, or include a unique ID.", 409);
+    }
     $zip = null;
     $filename = null;
     $source = bounded("scaffold_source", 20, false) ?: "upload";
     $luckyId = bounded("lucky_id", 36, false);
-    if (!in_array($source, ["none", "upload", "url", "generated"], true)) {
+    if (!in_array($source, ["none", "upload", "url", "kawaiipantsu", "generated"], true)) {
         fail("Choose a scaffolding source.");
     }
     if (
@@ -222,14 +230,18 @@ if ($action === "create" && $method === "POST") {
         validate_zip($f["tmp_name"]);
         $zip = file_get_contents($f["tmp_name"]);
         $filename = basename($f["name"]);
-    } elseif ($source === "url") {
+    } elseif ($source === "url" || $source === "kawaiipantsu") {
         require_once __DIR__ . "/../app/zip-source.php";
-        $url = bounded("zip_url", 2048);
+        $url = $source === "kawaiipantsu"
+            ? "https://github.com/kawaiipantsu/ai-project-scaffold/releases/latest/download/scaffold.zip"
+            : bounded("zip_url", 2048);
         session_write_close();
         $tmp = download_zip($url);
         try {
             $zip = file_get_contents($tmp);
-            $filename = "imported-scaffold.zip";
+            $filename = $source === "kawaiipantsu"
+                ? "kawaiipantsu-scaffold.zip"
+                : "imported-scaffold.zip";
         } finally {
             unlink($tmp);
         }
@@ -256,7 +268,7 @@ if ($action === "create" && $method === "POST") {
     db()->beginTransaction();
     if ($luckyId !== "") {
         $draft = q(
-            "SELECT id FROM lucky_drafts WHERE id=? AND user_id=? AND status='ready' FOR UPDATE",
+            "SELECT id FROM lucky_drafts WHERE id=? AND (user_id=? OR EXISTS (SELECT 1 FROM suggestions WHERE draft_id=lucky_drafts.id)) AND status='ready' FOR UPDATE",
             [$luckyId, $u["id"]],
         )->fetch();
         if (!$draft) {
@@ -268,10 +280,11 @@ if ($action === "create" && $method === "POST") {
         q("UPDATE lucky_drafts SET status='used' WHERE id=?", [$luckyId]);
     }
     q(
-        "INSERT INTO jobs(name,slug,prompt,provider,model,mode,effort,agents,dynamic_work,created_by) VALUES(?,?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO jobs(name,slug,workspace,prompt,provider,model,mode,effort,agents,dynamic_work,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
         [
             $name,
             $slug,
+            $workspace,
             $prompt,
             $provider,
             $model,
@@ -292,7 +305,7 @@ if ($action === "create" && $method === "POST") {
     }
     audit("job.create", (string) $id, $name);
     db()->commit();
-    output(["id" => $id, "slug" => $slug], 201);
+    output(["id" => $id, "slug" => $slug, "workspace" => $workspace], 201);
 }
 $id = (int) ($_GET["id"] ?? 0);
 if (
