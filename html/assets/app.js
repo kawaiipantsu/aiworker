@@ -28,6 +28,297 @@ function toast(message) {
   $("#toast").style.display = "block";
   setTimeout(() => ($("#toast").style.display = "none"), 4000);
 }
+
+// --- Worker output pretty-printer -----------------------------------------
+// Turns raw event rows ({kind, body, created_at, id}) into a readable
+// timeline, mirroring the parsing rules of assets/present-output.php.
+const LOG_MAX_RAW = 12000;
+const LOG_TOOL_TITLES = {
+  Bash: "Running command",
+  Read: "Reading file",
+  Write: "Writing file",
+  Edit: "Editing file",
+  WebSearch: "Searching the web",
+  WebFetch: "Fetching web resource",
+  TaskOutput: "Checking task output",
+};
+function logRedact(text) {
+  return String(text)
+    .replace(
+      /((?:password|passwd|pwd|api[_-]?key|token|secret|authorization)\s*["']?\s*[:=]\s*["']?)([^\s,"'}]+)/gi,
+      "$1[REDACTED]",
+    )
+    .replace(/(Bearer\s+)[A-Za-z0-9._~+\/=-]+/gi, "$1[REDACTED]")
+    .replace(
+      /([A-Za-z0-9_]*(?:PASSWORD|SECRET|TOKEN|API_KEY)[A-Za-z0-9_]*\s*=\s*)([^\s]+)/gi,
+      "$1[REDACTED]",
+    );
+}
+function logShorten(text, max = 900) {
+  text = String(text ?? "").trim();
+  const chars = [...text];
+  if (chars.length <= max) return text;
+  return chars.slice(0, max).join("") + "…";
+}
+function logCompactPath(path) {
+  path = String(path).replace(/\\/g, "/");
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 4) return path;
+  return "…/" + parts.slice(-4).join("/");
+}
+function logJsonFromText(text) {
+  const start = text.indexOf("{");
+  if (start === -1) return null;
+  try {
+    const data = JSON.parse(text.slice(start));
+    return data && typeof data === "object" ? data : null;
+  } catch {
+    return null;
+  }
+}
+function logStringifyContent(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    const parts = [];
+    for (const item of content) {
+      if (typeof item === "string") parts.push(item);
+      else if (item && typeof item === "object") {
+        if (item.text !== undefined) parts.push(String(item.text));
+        else if (typeof item.content === "string") parts.push(item.content);
+        else if (item.type === "tool_result" && item.content !== undefined)
+          parts.push(logStringifyContent(item.content));
+      }
+    }
+    return parts.join("\n");
+  }
+  return "";
+}
+function logUcfirst(s) {
+  return s ? s[0].toUpperCase() + s.slice(1) : s;
+}
+function logNormalizeJson(j, raw) {
+  const type = String(j.type || "event");
+  const subtype = String(j.subtype || "");
+  const event = {
+    type: "info",
+    status: "info",
+    title: "Activity",
+    summary: "",
+    tool: "",
+    command: "",
+    details: "",
+    raw: logRedact(logShorten(raw, LOG_MAX_RAW)),
+  };
+  if (type === "system" && subtype === "init") {
+    event.type = "system";
+    event.status = "running";
+    event.title = "AI session initialized";
+    const bits = [];
+    if (j.model) bits.push(j.model);
+    if (j.permissionMode) bits.push("mode: " + j.permissionMode);
+    if (j.cwd) bits.push(logCompactPath(String(j.cwd)));
+    event.summary = bits.join(" · ");
+    return event;
+  }
+  if (type === "rate_limit_event") {
+    event.type = "noise";
+    event.title = "Rate limit status";
+    event.summary = String(j.rate_limit_info?.status || "updated");
+    return event;
+  }
+  if (type === "system" && subtype === "thinking_tokens") {
+    event.type = "noise";
+    event.title = "Thinking";
+    event.summary =
+      j.estimated_tokens !== undefined
+        ? "~" + j.estimated_tokens + " tokens"
+        : "";
+    return event;
+  }
+  if (type === "assistant" || type === "user") {
+    const content = logStringifyContent(j.message?.content ?? "");
+    if (content !== "") {
+      event.type = type === "assistant" ? "message" : "result";
+      event.title = type === "assistant" ? "AI message" : "Tool result";
+      event.summary = logShorten(logRedact(content), 1200);
+      const low = content.toLowerCase();
+      event.status =
+        low.includes("error") ||
+        low.includes("exit code 1") ||
+        low.includes("exit code 2")
+          ? "warning"
+          : "success";
+      return event;
+    }
+  }
+  event.title = logUcfirst((type + " " + subtype).trim().replace(/_/g, " "));
+  event.summary = logShorten(logRedact(JSON.stringify(j)), 700);
+  return event;
+}
+function logParseEvent(row) {
+  const category = String(row.kind || "").toLowerCase();
+  const body = String(row.body ?? "");
+  const raw = `[${row.created_at}] ${category}  ${body}`;
+  const event = {
+    type: category || "info",
+    status: "info",
+    title: "Log entry",
+    summary: "",
+    tool: "",
+    command: "",
+    details: "",
+    raw: logRedact(logShorten(raw, LOG_MAX_RAW)),
+  };
+  const trimmedBody = body.trim();
+  const toolMatch = trimmedBody.match(/^Tool:\s*([A-Za-z0-9_-]+)\s*([\s\S]*)$/);
+  if (toolMatch) {
+    const tool = toolMatch[1];
+    const payload = toolMatch[2].trim();
+    let args = null;
+    try {
+      args = JSON.parse(payload);
+    } catch {}
+    if (!args || typeof args !== "object") args = {};
+    event.type = "tool";
+    event.status = "running";
+    event.tool = tool;
+    event.title = LOG_TOOL_TITLES[tool] || "Using " + tool;
+    if (args.description) event.summary = String(args.description);
+    if (args.file_path) event.summary = logCompactPath(String(args.file_path));
+    if (args.command) event.command = logShorten(logRedact(String(args.command)), 1000);
+    else if (payload) event.details = logShorten(logRedact(payload), 800);
+    return event;
+  }
+  const json = logJsonFromText(body);
+  if (json !== null) return logNormalizeJson(json, raw);
+  const lower = body.toLowerCase();
+  if (category === "status" || lower.includes("worker starting")) {
+    event.type = "status";
+    event.status = "running";
+    event.title = lower.includes("worker starting")
+      ? "Worker starting"
+      : "Status update";
+    event.summary = body.replace(/^running:\s*/i, "").trim();
+  } else if (category === "system") {
+    event.type = "system";
+    event.status = "running";
+    event.title = "System";
+    event.summary = body.trim();
+  } else if (/\b(error|fatal|failed|exception)\b/i.test(body)) {
+    event.type = "error";
+    event.status = "error";
+    event.title = "Error";
+    event.summary = logShorten(logRedact(body.trim()), 1200);
+  } else {
+    event.title = category === "output" ? "Output" : "Activity";
+    event.summary = logShorten(logRedact(body.trim()), 1200);
+  }
+  return event;
+}
+function logArticleTypes(event) {
+  const types = [event.type || "info"];
+  if (["Read", "Write", "Edit", "NotebookEdit"].includes(event.tool))
+    types.push("file");
+  if (["error", "warning"].includes(event.status)) types.push("issues");
+  return types;
+}
+function logRenderInner(event, rowId) {
+  let html = `<span class="tl-dot"></span><div class="tl-head"><span class="tl-title">${esc(event.title || "Activity")}</span>`;
+  if (event.tool) html += `<span class="tl-tag">${esc(event.tool)}</span>`;
+  if (event.timestamp)
+    html += `<span class="tl-time">${esc(event.timestamp)}</span>`;
+  html += `</div>`;
+  if (event.summary)
+    html += `<div class="tl-summary">${esc(event.summary)}</div>`;
+  if (event.command)
+    html += `<div class="tl-terminal"><div class="tl-terminal-bar"><i></i><i></i><i></i><span>command</span></div><pre>$ ${esc(event.command)}</pre></div>`;
+  if (event.details)
+    html += `<details><summary>Show result</summary><pre>${esc(event.details)}</pre></details>`;
+  if (event.raw)
+    html += `<details><summary>Raw event · #${esc(rowId)}</summary><pre>${esc(event.raw)}</pre></details>`;
+  return html;
+}
+function logApplyArticle(el, event, row) {
+  el._event = event;
+  el._row = row;
+  const classes = ["tl-event"];
+  if (event.type === "noise") classes.push("tl-noise");
+  el.className = classes.join(" ");
+  el.dataset.type = logArticleTypes(event).join(" ");
+  el.dataset.status = event.status || "info";
+  if (event.hiddenByDefault) el.dataset.internal = "1";
+  else delete el.dataset.internal;
+  el.innerHTML = logRenderInner(event, row.id);
+}
+const LogView = (() => {
+  let container = null,
+    lastArticle = null;
+  function reset(el) {
+    container = el;
+    lastArticle = null;
+    container.innerHTML = "";
+  }
+  function empty(message) {
+    if (container) container.innerHTML = `<div class="tl-empty">${esc(message)}</div>`;
+  }
+  function append(rows) {
+    if (!container || !rows.length) return;
+    if (container.querySelector(".tl-empty")) container.innerHTML = "";
+    for (const row of rows) {
+      const event = logParseEvent(row);
+      event.timestamp = row.created_at;
+      if (
+        event.type === "result" &&
+        lastArticle &&
+        lastArticle._event.type === "tool"
+      ) {
+        const prev = lastArticle._event;
+        prev.details = logShorten(event.summary, 1800);
+        prev.status = event.status === "warning" ? "warning" : "success";
+        logApplyArticle(lastArticle, prev, lastArticle._row);
+        continue;
+      }
+      const article = document.createElement("article");
+      logApplyArticle(article, event, row);
+      container.appendChild(article);
+      lastArticle = article;
+    }
+  }
+  return { reset, empty, append };
+})();
+let currentLogFilter = "all";
+function applyLogFilter(filter) {
+  currentLogFilter = filter;
+  $$("#log-filters .tl-filter").forEach((b) =>
+    b.classList.toggle("active", b.dataset.filter === filter),
+  );
+  $$("#logs .tl-event").forEach((el) => {
+    const types = (el.dataset.type || "").split(/\s+/);
+    const internal = el.dataset.internal === "1";
+    let show;
+    if (filter === "all") show = !internal;
+    else if (filter === "noise") show = internal;
+    else show = types.includes(filter) && !internal;
+    el.classList.toggle("tl-hidden", !show);
+  });
+}
+function updateLogStats() {
+  if (!$("#log-stats")) return;
+  const events = $$("#logs .tl-event");
+  let tools = 0,
+    issues = 0;
+  events.forEach((el) => {
+    const types = (el.dataset.type || "").split(/\s+/);
+    if (types.includes("tool")) tools++;
+    if (types.includes("issues")) issues++;
+  });
+  $("#log-stats").textContent =
+    `${events.length} action${events.length === 1 ? "" : "s"} · ${tools} tool${tools === 1 ? "" : "s"} · ${issues} issue${issues === 1 ? "" : "s"}`;
+}
+document.addEventListener("click", (e) => {
+  const t = e.target.closest(".tl-terminal");
+  if (t) t.classList.toggle("tl-expanded");
+});
 async function api(action, data, extra = "") {
   const opt = { headers: { "X-CSRF-Token": csrf } };
   if (data !== undefined) {
@@ -379,7 +670,13 @@ async function detailView(id) {
   detailId = id;
   lastEvent = 0;
   $("#main").innerHTML =
-    `<a class="back" href="#">← All workloads</a><div id="detail-head"></div><div id="questions"></div><div class="detail-grid"><section class="card"><h3>Initial prompt</h3><div id="prompt" class="prompt-text"></div></section><section class="card"><h3>Workload details</h3><div id="metadata" class="metadata"></div></section></div><section class="log-card"><div class="log-head"><span>● &nbsp; Worker output <span class="muted">/ live stream</span></span><label class="check"><input type="checkbox" id="autoscroll" checked> Follow output</label></div><pre id="logs" class="logs">Waiting for worker output…\n</pre></section><section class="card spacing-top"><h3>Send direction</h3><form id="message-form"><textarea name="body" required maxlength="16000" rows="3" placeholder="Add requirements, answer context, or steer the project…"></textarea><p class="hint">Queued messages are read by the worker’s inbox helper or delivered at the next turn. Use “Interrupt & steer” to stop the current turn and resume with your message.</p><div class="actions"><button class="primary">Queue message</button><button type="button" id="steer" class="secondary">Interrupt & steer</button></div></form><div id="messages"></div></section>`;
+    `<a class="back" href="#">← All workloads</a><div id="detail-head"></div><div id="questions"></div><div class="detail-grid"><section class="card"><h3>Initial prompt</h3><div id="prompt" class="prompt-text"></div></section><section class="card"><h3>Workload details</h3><div id="metadata" class="metadata"></div></section></div><section class="log-card"><div class="log-head"><span>● &nbsp; Worker output <span class="muted">/ live stream</span></span><span id="log-stats" class="tl-stats"></span><label class="check"><input type="checkbox" id="autoscroll" checked> Follow output</label></div><div class="tl-filters" id="log-filters"><button class="tl-filter active" data-filter="all">All</button><button class="tl-filter" data-filter="tool">Commands</button><button class="tl-filter" data-filter="file">Files</button><button class="tl-filter" data-filter="message">Messages</button><button class="tl-filter" data-filter="issues">Errors & warnings</button><button class="tl-filter" data-filter="noise">Internal</button></div><div id="logs" class="logs timeline"></div></section><section class="card spacing-top"><h3>Send direction</h3><form id="message-form"><textarea name="body" required maxlength="16000" rows="3" placeholder="Add requirements, answer context, or steer the project…"></textarea><p class="hint">Queued messages are read by the worker’s inbox helper or delivered at the next turn. Use “Interrupt & steer” to stop the current turn and resume with your message.</p><div class="actions"><button class="primary">Queue message</button><button type="button" id="steer" class="secondary">Interrupt & steer</button></div></form><div id="messages"></div></section>`;
+  LogView.reset($("#logs"));
+  LogView.empty("Waiting for worker output…");
+  currentLogFilter = "all";
+  $$("#log-filters .tl-filter").forEach(
+    (b) => (b.onclick = () => applyLogFilter(b.dataset.filter)),
+  );
   $("#message-form").onsubmit = safe(async (e) => {
     e.preventDefault();
     await api("message", formData(e.currentTarget), "&id=" + id);
@@ -483,15 +780,11 @@ async function logs() {
   if (id !== detailId) return;
   const el = $("#logs");
   if (d.events.length) {
-    if (!lastEvent) el.textContent = "";
-    for (const e of d.events) {
-      el.append(
-        document.createTextNode(`[${e.created_at}] ${e.kind}  ${e.body}\n`),
-      );
-      lastEvent = Number(e.id);
-    }
-    if (el.textContent.length > 1500000)
-      el.textContent = el.textContent.slice(-1000000);
+    LogView.append(d.events);
+    for (const e of d.events) lastEvent = Number(e.id);
+    while (el.children.length > 2000) el.removeChild(el.firstChild);
+    applyLogFilter(currentLogFilter);
+    updateLogStats();
     if ($("#autoscroll").checked) el.scrollTop = el.scrollHeight;
   }
 }
